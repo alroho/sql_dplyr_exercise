@@ -284,6 +284,10 @@ Exercise
 FROM Match" %>%
   dbGetQuery(sql_con, .)
 ```
+```{r}
+match_db <- tbl(sql_con, "Match")
+summarize(match_db, count = n())
+```
 
 
 ```{r}
@@ -294,13 +298,19 @@ GROUP BY country_id
 ORDER BY n DESC" %>%
   dbGetQuery(sql_con, .)
 ```
+```{r}
+match_db <- tbl(sql_con, "Match")
+grouped_by_country <- group_by(match_db, country_id)
+arrange(summarize(grouped_by_country, count = n()), desc(count))
+```
+
+
 
 ```{r}
 match_db <- tbl_df(dbGetQuery(sql_con,"SELECT * FROM Match"))
 country_db <- tbl_df(dbGetQuery(sql_con,"SELECT * FROM Country"))
 teams <- tbl_df(dbGetQuery(sql_con,"SELECT * FROM Team"))
 ```
-
 
 ```{r}
 match_db %>%
@@ -311,11 +321,57 @@ match_db %>%
   arrange(desc(teams))
 ```
 
-* List 5 players and their highest rating that had the lowest potential ever.
 
-* Which team has the higest average of goles when playing home in season 2008/2009 in Poland?
+```{sql, connection=sql_con}
+SELECT c.name, m.country_id
+FROM Match m
+LEFT JOIN Country c ON m.country_id=c.id
+GROUP BY c.name
 
-* Which team and from which country and which season scored the higest number of goals?
+```
+
+
+
+* List 5 players and their highest rating that had the lowest rating ever.
+```{sql connection=sql_con}
+SELECT Player.player_name, pa.min_rating 
+FROM Player
+LEFT JOIN (
+  SELECT player_api_id, MIN(overall_rating) AS min_rating
+  FROM Player_Attributes
+  GROUP BY player_api_id) pa
+ON Player.player_api_id = pa.player_api_id
+ORDER BY pa.min_rating ASC
+LIMIT 10
+```
+
+```{r}
+player_db <- tbl(sql_con, "Player")
+player_attributes_db <- tbl(sql_con, "Player_Attributes")
+
+player_db %>%
+  left_join(
+    {player_attributes_db %>% 
+      group_by(player_api_id) %>%
+      summarise(min_rating=min(overall_rating, na.rm=TRUE))}, 
+    by='player_api_id') %>%
+  arrange(min_rating) %>%
+  select(player_name, min_rating) %>%
+  head(10)
+```
+
+```{r}
+player_attributes_db %>%
+  group_by(player_api_id) %>%
+  summarize(
+    min_rating=min(overall_rating)
+  ) %>%
+  arrange(min_rating) %>%
+  left_join(player_db, by='player_api_id') %>%
+  select(player_name, min_rating) %>%
+  head(10)
+```
+
 
 ## Whisker
 
@@ -360,3 +416,58 @@ dbDisconnect(sql_con)
 ```
 
 https://db.rstudio.com/dplyr/
+
+
+---------------- MORE EXERCISES
+
+* Which team has the higest average of goals when playing home in season 2008/2009 in Poland?
+
+```{sql connection=sql_con}
+SELECT t.team_long_name
+FROM Team t
+WHERE t.team_api_id=(
+  SELECT m.home_team_api_id
+  FROM Match m
+  LEFT JOIN Country c
+    ON m.country_id=c.id
+    WHERE c.name='Poland' AND m.season='2008/2009'
+  GROUP BY m.home_team_api_id
+  ORDER BY m.home_team_goal DESC
+  LIMIT 1
+)
+```
+
+
+```{r}
+template <- "
+SELECT t.team_long_name
+FROM Team t
+WHERE t.team_api_id=(
+  SELECT m.home_team_api_id
+  FROM Match m
+  LEFT JOIN Country c
+    ON m.country_id=c.id
+    WHERE c.name='{{{country_name}}}' AND m.season='{{{season}}}'
+  GROUP BY m.home_team_api_id
+  ORDER BY m.home_team_goal DESC
+  LIMIT 1
+)
+"
+
+data <- list( 
+  country_name="Poland",
+  season='2008/2009'
+)
+
+query<- whisker.render(template, data)
+
+dbGetQuery(sql_con, query)
+
+ 
+```
+
+
+* Which team and from which country and which season scored the higest number of goals?
+
+
+
